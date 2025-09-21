@@ -1,0 +1,246 @@
+version: '3.8'
+
+# HTTP Boot Infrastructure - Docker Compose Configuration
+# =======================================================
+
+services:
+  httpboot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${CONTAINER_REGISTRY:-docker.io}/httpboot-server:${CONTAINER_IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_NAME:-httpboot-server}
+    
+    # Network configuration
+    network_mode: host
+    privileged: true
+    
+    # Port mappings (when not using host networking)
+    # ports:
+    #   - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}/tcp"
+    #   - "${TFTP_PORT:-69}:69/udp"
+    
+    # Environment variables
+    environment:
+      # Network Settings
+      - NETWORK_SUBNET=${NETWORK_SUBNET:-192.168.1.0/24}
+      - DHCP_RANGE_START=${DHCP_RANGE_START:-192.168.1.100}
+      - DHCP_RANGE_END=${DHCP_RANGE_END:-192.168.1.200}
+      - GATEWAY_IP=${GATEWAY_IP:-192.168.1.1}
+      - DNS_PRIMARY=${DNS_PRIMARY:-8.8.8.8}
+      - DNS_SECONDARY=${DNS_SECONDARY:-8.8.4.4}
+      - HOST_IP=${HOST_IP:-192.168.1.10}
+      
+      # Service Configuration
+      - HTTP_PORT=${HTTP_PORT:-8080}
+      - TFTP_PORT=${TFTP_PORT:-69}
+      - ENABLE_SECURE_BOOT=${ENABLE_SECURE_BOOT:-false}
+      - BOOT_TIMEOUT=${BOOT_TIMEOUT:-30}
+      
+      # Distribution Settings
+      - PRIMARY_DISTRO=${PRIMARY_DISTRO:-debian}
+      - ARCHITECTURE=${ARCHITECTURE:-amd64}
+      - BOOT_METHOD=${BOOT_METHOD:-both}
+      - ADDITIONAL_DISTROS=${ADDITIONAL_DISTROS:-}
+      - DEBIAN_RELEASE=${DEBIAN_RELEASE:-bookworm}
+      - UBUNTU_RELEASE=${UBUNTU_RELEASE:-jammy}
+      - CENTOS_RELEASE=${CENTOS_RELEASE:-9-stream}
+      
+      # Security Settings
+      - ENABLE_HTTP_AUTH=${ENABLE_HTTP_AUTH:-false}
+      - HTTP_USERNAME=${HTTP_USERNAME:-admin}
+      - HTTP_PASSWORD=${HTTP_PASSWORD:-changeme}
+      - ALLOWED_NETWORKS=${ALLOWED_NETWORKS:-192.168.1.0/24,10.0.0.0/8}
+      - ENABLE_SSL=${ENABLE_SSL:-false}
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      
+      # Service Configuration
+      - ENABLE_DHCP_RELAY=${ENABLE_DHCP_RELAY:-false}
+      - TFTP_BLOCKSIZE=${TFTP_BLOCKSIZE:-1024}
+      - HTTP_KEEPALIVE=${HTTP_KEEPALIVE:-60}
+      - MAX_CONCURRENT_DOWNLOADS=${MAX_CONCURRENT_DOWNLOADS:-10}
+      
+      # Logging and Monitoring
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_ACCESS_LOG=${ENABLE_ACCESS_LOG:-true}
+      - HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-30}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    
+    # Volume mounts
+    volumes:
+      - type: bind
+        source: ${DATA_DIRECTORY:-./data}
+        target: /var/lib/httpboot
+        bind:
+          create_host_path: true
+      
+      - type: bind
+        source: ./scripts
+        target: /usr/local/scripts
+        read_only: true
+        bind:
+          create_host_path: true
+      
+      # Optional SSL certificate mounts
+      # - type: bind
+      #   source: ${SSL_CERT_PATH}
+      #   target: /etc/ssl/certs/httpboot.crt
+      #   read_only: true
+      # - type: bind
+      #   source: ${SSL_KEY_PATH}
+      #   target: /etc/ssl/private/httpboot.key
+      #   read_only: true
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-1g}
+          cpus: '${CPU_LIMIT:-1.0}'
+        reservations:
+          memory: 256m
+          cpus: '0.25'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${HTTP_PORT:-8080}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Restart policy
+    restart: ${RESTART_POLICY:-always}
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=httpboot"
+    
+    # DNS configuration
+    dns:
+      - ${DNS_PRIMARY:-8.8.8.8}
+      - ${DNS_SECONDARY:-8.8.4.4}
+    
+    # Extra hosts (optional)
+    # extra_hosts:
+    #   - "boot.local:${HOST_IP:-192.168.1.10}"
+    
+    # Labels for identification
+    labels:
+      - "service=httpboot-infrastructure"
+      - "version=${CONTAINER_IMAGE_TAG:-latest}"
+      - "maintainer=httpboot-setup"
+      - "description=HTTP Boot Infrastructure Server"
+
+# Optional: Separate services for advanced configurations
+# ========================================================
+
+  # Separate DHCP service (if needed)
+  # dhcp-server:
+  #   image: networkboot/dhcpd
+  #   container_name: ${CONTAINER_NAME:-httpboot}-dhcp
+  #   network_mode: host
+  #   privileged: true
+  #   volumes:
+  #     - ./configs/dhcp:/etc/dhcp:ro
+  #   depends_on:
+  #     - httpboot-server
+
+  # Database for boot tracking (optional)
+  # boot-database:
+  #   image: postgres:15-alpine
+  #   container_name: ${CONTAINER_NAME:-httpboot}-db
+  #   environment:
+  #     POSTGRES_DB: httpboot
+  #     POSTGRES_USER: httpboot
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-httpboot123}
+  #   volumes:
+  #     - boot-db-data:/var/lib/postgresql/data
+  #   restart: always
+
+  # Monitoring with Prometheus (optional)
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: ${CONTAINER_NAME:-httpboot}-prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./configs/prometheus:/etc/prometheus:ro
+  #     - prometheus-data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
+  #     - '--web.console.templates=/etc/prometheus/consoles'
+  #   depends_on:
+  #     - httpboot-server
+
+  # Log aggregation with Grafana Loki (optional)
+  # loki:
+  #   image: grafana/loki:latest
+  #   container_name: ${CONTAINER_NAME:-httpboot}-loki
+  #   ports:
+  #     - "3100:3100"
+  #   volumes:
+  #     - loki-data:/loki
+  #   command: -config.file=/etc/loki/local-config.yaml
+
+  # Grafana dashboard (optional)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: ${CONTAINER_NAME:-httpboot}-grafana
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #     - ./configs/grafana:/etc/grafana/provisioning:ro
+  #   depends_on:
+  #     - prometheus
+  #     - loki
+
+# Networks (for advanced configurations)
+# ======================================
+
+networks:
+  # Custom bridge network (alternative to host networking)
+  httpboot-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${CONTAINER_SUBNET:-172.20.0.0/16}
+
+# Volumes (for persistent data storage)
+# =====================================
+
+volumes:
+  # Persistent volumes for optional services
+  boot-db-data:
+    driver: local
+  
+  prometheus-data:
+    driver: local
+  
+  grafana-data:
+    driver: local
+  
+  loki-data:
+    driver: local
+
+# Configuration examples for different deployment scenarios
+# =========================================================
+
+# Production deployment with all services:
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+# Development deployment with debugging:
+# docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+# Minimal deployment (default):
+# docker-compose up -d httpboot-server

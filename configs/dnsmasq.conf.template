@@ -1,0 +1,25 @@
+# DHCP Configuration
+interface=eth0
+dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},12h
+
+# TFTP Configuration
+enable-tftp
+tftp-root=/var/lib/httpboot/tftp
+
+# PXE Boot Configuration
+dhcp-boot=pxelinux.0,${HOST_IP}
+
+# Domain and DNS
+domain-needed
+bogus-priv
+no-resolv
+server=8.8.8.8
+server=8.8.4.4
+
+# Logging
+log-queries
+log-dhcp
+
+# Security
+dhcp-authoritative
+dhcp-leasefile=/var/lib/httpboot/logs/dnsmasq.leases

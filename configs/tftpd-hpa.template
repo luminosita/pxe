@@ -1,0 +1,6 @@
+# /etc/default/tftpd-hpa
+
+TFTP_USERNAME="httpboot"
+TFTP_DIRECTORY="/var/lib/httpboot/tftp"
+TFTP_ADDRESS="0.0.0.0:${TFTP_PORT}"
+TFTP_OPTIONS="--secure --create --verbose"
