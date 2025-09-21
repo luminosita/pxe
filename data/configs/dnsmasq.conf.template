@@ -1,0 +1,35 @@
+# dnsmasq configuration for HTTP Boot Infrastructure
+# ==================================================
+
+# Basic configuration
+port=0
+interface=eth0
+bind-interfaces
+
+# DHCP configuration
+dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},12h
+dhcp-option=option:router,${GATEWAY_IP}
+dhcp-option=option:dns-server,${DNS_PRIMARY},${DNS_SECONDARY}
+
+# PXE Boot configuration
+dhcp-boot=pxelinux.0,${HOST_IP}
+
+# TFTP settings
+enable-tftp
+tftp-root=/var/lib/httpboot/tftp
+tftp-secure
+
+# Logging
+log-dhcp
+log-queries
+
+# Cache settings
+cache-size=1000
+neg-ttl=60
+
+# Security
+bogus-priv
+domain-needed
+no-resolv
+server=${DNS_PRIMARY}
+server=${DNS_SECONDARY}

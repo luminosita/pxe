@@ -75,11 +75,13 @@ download_with_retry() {
     while [[ $attempt -le $max_attempts ]]; do
         print_status "$BLUE" "🔄 Attempt $attempt/$max_attempts: $(basename "$output")"
         
-        if wget --progress=bar:force:noscroll \
-               --timeout=30 \
-               --tries=1 \
-               --continue \
-               "$url" -O "$output"; then
+        if curl -L --progress-bar \
+               --connect-timeout 30 \
+               --max-time 300 \
+               --retry 0 \
+               -C - \
+               -o "$output" \
+               "$url"; then
             print_status "$GREEN" "✅ Downloaded: $(basename "$output")"
             return 0
         else
@@ -685,6 +687,9 @@ EOF
         # Verify downloads
         if verify_downloads; then
             generate_summary
+
+            # Validate HTTP and TFTP services
+            validate_services
         else
             print_status "$RED" "❌ Download verification failed"
             exit 1

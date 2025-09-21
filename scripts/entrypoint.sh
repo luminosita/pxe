@@ -21,10 +21,12 @@ chown -R root:root /var/lib/httpboot/logs /var/lib/httpboot/configs
 chmod 755 /var/lib/httpboot/tftp /var/lib/httpboot/http
 chmod 755 /var/lib/httpboot/logs /var/lib/httpboot/configs
 
-# Download boot images if needed
-if [[ "${DOWNLOAD_IMAGES:-true}" == "true" ]]; then
+# Download boot images if needed (disabled for containerized deployment)
+if [[ "${DOWNLOAD_IMAGES:-false}" == "true" ]] && [[ -x "/usr/local/bin/download-images.sh" ]]; then
     log "📥 Downloading boot images..."
     /usr/local/bin/download-images.sh
+else
+    log "📝 Boot image download skipped (use host scripts/download-images.sh instead)"
 fi
 
 # Create health check endpoint

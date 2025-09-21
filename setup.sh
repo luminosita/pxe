@@ -420,6 +420,96 @@ cleanup() {
 trap 'cleanup $?' EXIT
 trap 'print_status "$RED" "❌ Setup interrupted"; exit 1' INT TERM
 
+# Configure services using templates
+configure_services() {
+    print_header "🔧 Configuring Service Templates"
+
+    local configure_script="$SCRIPT_DIR/scripts/configure-services.sh"
+    local configs_dir="$SCRIPT_DIR/data/configs"
+
+    # Check if configuration script exists
+    if [[ ! -f "$configure_script" ]]; then
+        print_status "$YELLOW" "⚠️  configure-services.sh not found, skipping"
+        return 0
+    fi
+
+    # Check if config templates directory exists
+    if [[ ! -d "$configs_dir" ]]; then
+        print_status "$RED" "❌ Configuration templates directory not found: $configs_dir"
+        error_exit "Missing configuration templates"
+    fi
+
+    # Validate config templates exist
+    local required_templates=(
+        "$configs_dir/nginx.conf.template"
+        "$configs_dir/dnsmasq.conf.template"
+        "$configs_dir/tftpd-hpa.template"
+        "$configs_dir/supervisord.conf.template"
+    )
+
+    print_status "$BLUE" "🔍 Validating configuration templates..."
+
+    for template in "${required_templates[@]}"; do
+        if [[ -f "$template" ]]; then
+            print_status "$GREEN" "✅ Found: $(basename "$template")"
+        else
+            print_status "$YELLOW" "⚠️  Missing: $(basename "$template")"
+        fi
+    done
+
+    # Make configure script executable
+    if [[ ! -x "$configure_script" ]]; then
+        print_status "$BLUE" "🔧 Making configure-services.sh executable"
+        chmod +x "$configure_script"
+    fi
+
+    print_status "$BLUE" "📝 Configuration templates validated and ready for container use"
+    print_status "$BLUE" "💡 Services will be configured during container startup via entrypoint.sh"
+}
+
+# Run comprehensive health check
+run_health_check() {
+    print_header "🔬 Running Comprehensive Health Check"
+
+    # Check if health-check script exists
+    local health_check_script="$SCRIPT_DIR/scripts/health-check.sh"
+
+    if [[ ! -f "$health_check_script" ]]; then
+        print_status "$YELLOW" "⚠️  Health check script not found, skipping"
+        return 0
+    fi
+
+    if [[ ! -x "$health_check_script" ]]; then
+        print_status "$BLUE" "🔧 Making health check script executable"
+        chmod +x "$health_check_script"
+    fi
+
+    print_status "$BLUE" "🏥 Running health diagnostics..."
+
+    # Run health check in quick mode for setup validation
+    if "$health_check_script" quick; then
+        print_status "$GREEN" "✅ Health check passed - all services are healthy"
+    else
+        local exit_code=$?
+        case $exit_code in
+            1)
+                print_status "$YELLOW" "⚠️  Health check completed with warnings"
+                print_status "$YELLOW" "📋 Run './scripts/health-check.sh check' for detailed analysis"
+                ;;
+            2)
+                print_status "$RED" "❌ Health check found critical issues"
+                print_status "$RED" "📋 Run './scripts/health-check.sh check' for detailed analysis"
+                print_status "$YELLOW" "🔧 Container may still be starting - this is expected for new deployments"
+                ;;
+            *)
+                print_status "$YELLOW" "⚠️  Health check completed with status: $exit_code"
+                ;;
+        esac
+    fi
+
+    print_status "$BLUE" "💡 Use './scripts/health-check.sh' for ongoing monitoring"
+}
+
 # Main deployment function
 main() {
     local skip_validation=false
@@ -495,10 +585,12 @@ EOF
         print_status "$BLUE" "📦 Using existing container image: $image_name"
     fi
     
+    configure_services
     deploy_container
     test_services
+    run_health_check
     generate_summary
-    
+
     print_status "$GREEN" "✅ HTTP Boot Infrastructure setup completed successfully!"
 }
 

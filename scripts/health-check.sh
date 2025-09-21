@@ -17,9 +17,17 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Load environment variables from .env if available
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
 CONTAINER_NAME="${CONTAINER_NAME:-httpboot-server}"
 HTTP_PORT="${HTTP_PORT:-8080}"
-TFTP_PORT="${TFTP_PORT:-69}"
+TFTP_PORT="${TFTP_PORT:-6969}"
 HOST_IP="${HOST_IP:-127.0.0.1}"
 HEALTH_CHECK_INTERVAL="${HEALTH_CHECK_INTERVAL:-30}"
 LOG_FILE="${LOG_FILE:-$PROJECT_DIR/health-check.log}"
@@ -134,10 +142,12 @@ check_container_status() {
 # Check HTTP service
 check_http_service() {
     print_header "🌐 HTTP Service Health Check"
-    
-    local http_url="http://$HOST_IP:$HTTP_PORT"
+
+    # Use localhost for local health checks, regardless of configured HOST_IP
+    local local_ip="127.0.0.1"
+    local http_url="http://$local_ip:$HTTP_PORT"
     local health_url="$http_url/health"
-    
+
     print_status "$BLUE" "🔍 Testing HTTP service at: $http_url"
     
     # Test health endpoint
@@ -176,18 +186,29 @@ check_http_service() {
         esac
     fi
     
-    # Check if port is listening
-    if command -v ss >/dev/null 2>&1; then
-        if ss -tulpn | grep -q ":$HTTP_PORT "; then
-            print_status "$GREEN" "✅ HTTP port $HTTP_PORT is listening"
-        else
-            add_issue "HTTP port $HTTP_PORT is not listening"
+    # Check if port is listening (check container port mapping)
+    local port_mapped=false
+    if command -v podman >/dev/null 2>&1; then
+        if podman port "$CONTAINER_NAME" 2>/dev/null | grep -q "$HTTP_PORT/tcp"; then
+            print_status "$GREEN" "✅ HTTP port $HTTP_PORT is mapped from container"
+            port_mapped=true
         fi
-    elif command -v netstat >/dev/null 2>&1; then
-        if netstat -tulpn 2>/dev/null | grep -q ":$HTTP_PORT "; then
-            print_status "$GREEN" "✅ HTTP port $HTTP_PORT is listening"
-        else
-            add_issue "HTTP port $HTTP_PORT is not listening"
+    fi
+
+    if [[ "$port_mapped" != "true" ]]; then
+        # Fallback to system port check
+        if command -v ss >/dev/null 2>&1; then
+            if ss -tulpn | grep -q ":$HTTP_PORT "; then
+                print_status "$GREEN" "✅ HTTP port $HTTP_PORT is listening"
+            else
+                add_issue "HTTP port $HTTP_PORT is not accessible"
+            fi
+        elif command -v netstat >/dev/null 2>&1; then
+            if netstat -tulpn 2>/dev/null | grep -q ":$HTTP_PORT "; then
+                print_status "$GREEN" "✅ HTTP port $HTTP_PORT is listening"
+            else
+                add_issue "HTTP port $HTTP_PORT is not accessible"
+            fi
         fi
     fi
 }
@@ -195,27 +216,40 @@ check_http_service() {
 # Check TFTP service
 check_tftp_service() {
     print_header "📁 TFTP Service Health Check"
-    
+
+    # Use localhost for local health checks
+    local local_ip="127.0.0.1"
     print_status "$BLUE" "🔍 Testing TFTP service on port: $TFTP_PORT"
     
-    # Check if TFTP port is listening
-    if command -v ss >/dev/null 2>&1; then
-        if ss -tulpn | grep -q ":$TFTP_PORT "; then
-            print_status "$GREEN" "✅ TFTP port $TFTP_PORT is listening"
-        else
-            add_issue "TFTP port $TFTP_PORT is not listening"
+    # Check if TFTP port is listening (check container port mapping)
+    local tftp_port_mapped=false
+    if command -v podman >/dev/null 2>&1; then
+        if podman port "$CONTAINER_NAME" 2>/dev/null | grep -q "$TFTP_PORT/udp"; then
+            print_status "$GREEN" "✅ TFTP port $TFTP_PORT is mapped from container"
+            tftp_port_mapped=true
         fi
-    elif command -v netstat >/dev/null 2>&1; then
-        if netstat -tulpn 2>/dev/null | grep -q ":$TFTP_PORT "; then
-            print_status "$GREEN" "✅ TFTP port $TFTP_PORT is listening"
-        else
-            add_issue "TFTP port $TFTP_PORT is not listening"
+    fi
+
+    if [[ "$tftp_port_mapped" != "true" ]]; then
+        # Fallback to system port check
+        if command -v ss >/dev/null 2>&1; then
+            if ss -tulpn | grep -q ":$TFTP_PORT "; then
+                print_status "$GREEN" "✅ TFTP port $TFTP_PORT is listening"
+            else
+                add_issue "TFTP port $TFTP_PORT is not accessible"
+            fi
+        elif command -v netstat >/dev/null 2>&1; then
+            if netstat -tulpn 2>/dev/null | grep -q ":$TFTP_PORT "; then
+                print_status "$GREEN" "✅ TFTP port $TFTP_PORT is listening"
+            else
+                add_issue "TFTP port $TFTP_PORT is not accessible"
+            fi
         fi
     fi
     
     # Test TFTP connectivity using nc (if available)
     if command -v nc >/dev/null 2>&1; then
-        if timeout 3 nc -u -z "$HOST_IP" "$TFTP_PORT" 2>/dev/null; then
+        if timeout 3 nc -u -z "$local_ip" "$TFTP_PORT" 2>/dev/null; then
             print_status "$GREEN" "✅ TFTP port is accessible"
         else
             add_warning "TFTP port accessibility test inconclusive"
@@ -223,11 +257,11 @@ check_tftp_service() {
     else
         add_warning "nc not available - cannot test TFTP connectivity"
     fi
-    
+
     # Test TFTP service using tftp client (if available)
     if command -v tftp >/dev/null 2>&1; then
-        local test_result=$(timeout 5 tftp "$HOST_IP" -c get pxelinux.0 /dev/null 2>&1 || echo "failed")
-        if [[ "$test_result" != *"failed"* ]]; then
+        local test_result=$(timeout 5 bash -c "echo 'get pxelinux.0 /dev/null' | tftp $local_ip $TFTP_PORT" 2>&1 || echo "failed")
+        if [[ "$test_result" != *"failed"* ]] && [[ "$test_result" != *"timeout"* ]]; then
             print_status "$GREEN" "✅ TFTP service responds to requests"
         else
             add_warning "TFTP service test failed or pxelinux.0 not found"
@@ -287,6 +321,77 @@ check_data_directories() {
         add_issue "Disk space critically low: ${usage_percent}% used"
     elif [[ "$usage_percent" -gt 80 ]]; then
         add_warning "Disk space getting low: ${usage_percent}% used"
+    fi
+}
+
+# Check DHCP service (if applicable)
+check_dhcp_service() {
+    print_header "🔌 DHCP Service Check"
+
+    # Note: This infrastructure typically relies on existing DHCP server
+    # but we can check basic DHCP-related configuration
+
+    print_status "$BLUE" "🔍 Checking DHCP configuration..."
+
+    # Check if DHCP relay is enabled
+    if [[ "${ENABLE_DHCP_RELAY:-false}" == "true" ]]; then
+        print_status "$BLUE" "📡 DHCP relay is enabled"
+
+        # Check if we can reach the DHCP range
+        if [[ -n "${DHCP_RANGE_START:-}" ]] && [[ -n "${DHCP_RANGE_END:-}" ]]; then
+            print_status "$GREEN" "✅ DHCP range configured: ${DHCP_RANGE_START} - ${DHCP_RANGE_END}"
+        else
+            add_warning "DHCP range not fully configured"
+        fi
+
+        # Test network connectivity to DHCP range
+        if [[ -n "${DHCP_RANGE_START:-}" ]] && command -v ping >/dev/null 2>&1; then
+            local gateway="${GATEWAY_IP:-192.168.1.1}"
+            if ping -c 1 -W 3 "$gateway" >/dev/null 2>&1; then
+                print_status "$GREEN" "✅ Gateway ($gateway) is reachable"
+            else
+                add_warning "Gateway ($gateway) is not reachable"
+            fi
+        fi
+    else
+        print_status "$BLUE" "📝 DHCP relay disabled - relying on external DHCP server"
+
+        # Basic network configuration validation
+        if [[ -n "${NETWORK_SUBNET:-}" ]]; then
+            print_status "$GREEN" "✅ Network subnet configured: ${NETWORK_SUBNET}"
+        else
+            add_warning "Network subnet not configured"
+        fi
+
+        if [[ -n "${GATEWAY_IP:-}" ]]; then
+            print_status "$GREEN" "✅ Gateway IP configured: ${GATEWAY_IP}"
+
+            # Test gateway connectivity
+            if command -v ping >/dev/null 2>&1; then
+                if ping -c 1 -W 3 "${GATEWAY_IP}" >/dev/null 2>&1; then
+                    print_status "$GREEN" "✅ Gateway is reachable"
+                else
+                    add_warning "Gateway (${GATEWAY_IP}) is not reachable"
+                fi
+            fi
+        else
+            add_warning "Gateway IP not configured"
+        fi
+    fi
+
+    # Check DHCP configuration files if they exist in container
+    if podman exec "$CONTAINER_NAME" ls /etc/dhcp/ >/dev/null 2>&1; then
+        local dhcp_configs=$(podman exec "$CONTAINER_NAME" ls /etc/dhcp/ 2>/dev/null | wc -l)
+        if [[ "$dhcp_configs" -gt 0 ]]; then
+            print_status "$GREEN" "✅ DHCP configuration files present"
+        fi
+    fi
+
+    # Check if DHCP service is running in container (if enabled)
+    if podman exec "$CONTAINER_NAME" ps aux 2>/dev/null | grep -q dhcp; then
+        print_status "$GREEN" "✅ DHCP service is running in container"
+    else
+        print_status "$BLUE" "📝 No DHCP service running in container (expected for external DHCP)"
     fi
 }
 
@@ -631,6 +736,7 @@ main() {
             check_container_status
             check_http_service
             check_tftp_service
+            check_dhcp_service
             check_data_directories
             check_network_connectivity
             check_log_files

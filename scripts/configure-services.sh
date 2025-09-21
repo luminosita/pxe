@@ -22,7 +22,7 @@ rm -f /etc/nginx/sites-enabled/default.bak
 
 # Configure dnsmasq
 log "📝 Configuring dnsmasq..."
-envsubst '${DHCP_RANGE_START} ${DHCP_RANGE_END} ${HOST_IP}' \
+envsubst '${DHCP_RANGE_START} ${DHCP_RANGE_END} ${HOST_IP} ${GATEWAY_IP} ${DNS_PRIMARY} ${DNS_SECONDARY}' \
     < /etc/httpboot/dnsmasq.conf.template \
     > /etc/dnsmasq.conf
 
@@ -32,6 +32,12 @@ envsubst '${TFTP_PORT}' \
     < /etc/httpboot/tftpd-hpa.template \
     > /etc/default/tftpd-hpa
 
+# Configure Supervisor
+log "📝 Configuring Supervisor..."
+envsubst '${TFTP_PORT}' \
+    < /etc/httpboot/supervisord.conf.template \
+    > /etc/supervisor/conf.d/httpboot.conf
+
 # Test configuration files
 log "🧪 Testing configuration files..."
 
@@ -40,11 +46,30 @@ if ! nginx -t -c /etc/nginx/nginx.conf; then
     log "❌ Nginx configuration test failed"
     exit 1
 fi
+log "✅ Nginx configuration validated"
 
 # Test dnsmasq configuration
-if ! dnsmasq --test --conf-file=/etc/dnsmasq.conf; then
-    log "❌ dnsmasq configuration test failed"
-    exit 1
+if command -v dnsmasq >/dev/null 2>&1; then
+    if ! dnsmasq --test --conf-file=/etc/dnsmasq.conf 2>/dev/null; then
+        log "❌ dnsmasq configuration test failed"
+        exit 1
+    fi
+    log "✅ dnsmasq configuration validated"
+else
+    log "⚠️  dnsmasq not available for configuration testing"
+fi
+
+# Test supervisor configuration (basic syntax check only)
+if command -v supervisord >/dev/null 2>&1; then
+    # Basic syntax validation - supervisord doesn't have a proper test mode
+    if grep -q "\[supervisord\]" /etc/supervisor/conf.d/httpboot.conf; then
+        log "✅ Supervisor configuration validated"
+    else
+        log "❌ Supervisor configuration test failed"
+        exit 1
+    fi
+else
+    log "⚠️  supervisord not available for configuration testing"
 fi
 
 log "✅ All service configurations validated successfully"

@@ -1,4 +1,5 @@
-# /etc/default/tftpd-hpa
+# TFTP server configuration for HTTP Boot Infrastructure
+# =====================================================
 
 TFTP_USERNAME="httpboot"
 TFTP_DIRECTORY="/var/lib/httpboot/tftp"
