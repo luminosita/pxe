@@ -13,7 +13,7 @@ RUN useradd -r httpboot && \
     mkdir -p /var/lib/httpboot/http /var/lib/httpboot/tftp /var/lib/httpboot/logs /var/lib/httpboot/configs /etc/httpboot
 
 # Copy configuration templates to container
-COPY data/configs/ /etc/httpboot/
+COPY templates/ /etc/httpboot/
 
 # Copy service configuration and entrypoint scripts
 COPY scripts/configure-services.sh /usr/local/bin/configure-services.sh

@@ -15,6 +15,11 @@ netboot/
 ├── Dockerfile             # Multi-service container definition
 ├── setup.sh              # Main deployment automation script
 ├── docker-compose.yml     # Alternative orchestration option
+├── templates/             # Service configuration templates
+│   ├── nginx.conf.template       # HTTP server configuration
+│   ├── dnsmasq.conf.template     # DHCP and DNS configuration
+│   ├── tftpd-hpa.template        # TFTP server configuration
+│   └── supervisord.conf.template # Process management configuration
 ├── scripts/
 │   ├── download-images.sh # Linux distribution image management
 │   ├── backup-config.sh   # Configuration backup utility
@@ -22,7 +27,8 @@ netboot/
 ├── data/                  # Persistent storage directory
 │   ├── tftp/             # TFTP boot files
 │   ├── http/             # HTTP boot assets
-│   └── configs/          # Service configurations
+│   ├── logs/             # Service logs
+│   └── backup/           # Configuration backups
 ├── README.md         # Complete setup and usage guide
 ├── TROUBLESHOOTING.md # Common issues and solutions
 └── EXTENDING.md      # Adding new Linux distributions
@@ -302,3 +308,161 @@ After successful download and validation:
 - **Boot Files**: Debian installer available with kernel, initrd, and bootloader files
 - **Directory Structure**: Proper symlinks between TFTP and HTTP directories
 - **PXE Configuration**: Default boot menu configured for network installation
+
+## Development Workflow
+
+### Branch-Based Development
+
+This project follows a structured development workflow to ensure code quality and proper change management:
+
+#### Before Making Changes
+```bash
+# Always create a feature branch before making changes
+git checkout main
+git pull origin main
+git checkout -b feature/your-feature-name
+
+# Example for template changes
+git checkout -b feature/template-improvements
+```
+
+#### Making Changes
+1. **Create Feature Branch**: Always work in feature branches, never directly in main
+2. **Make Focused Changes**: Keep changes small and focused on a single feature or fix
+3. **Test Changes**: Validate all changes with `./setup.sh` and health checks
+4. **Update Documentation**: Update CLAUDE.md, README.md, or other docs as needed
+
+#### Pull Request Process
+```bash
+# After completing your changes, commit them
+git add .
+git commit -m "feat: descriptive commit message
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+
+# Push the branch and create a pull request
+git push -u origin feature/your-feature-name
+gh pr create --title "Brief PR title" --body "$(cat <<'EOF'
+## Summary
+- Brief description of changes
+- Why these changes are needed
+
+## Test Plan
+- [ ] Validated setup.sh works correctly
+- [ ] Health checks pass
+- [ ] Container builds successfully
+- [ ] All services start properly
+
+## Documentation Updates
+- [ ] Updated CLAUDE.md if needed
+- [ ] Updated README.md if needed
+
+🤖 Generated with [Claude Code](https://claude.ai/code)
+EOF
+)"
+```
+
+#### Git Branch Commands
+```bash
+# List all branches
+git branch -a
+
+# Switch to existing branch
+git checkout branch-name
+
+# Delete local branch (after merge)
+git branch -d feature/branch-name
+
+# Delete remote branch
+git push origin --delete feature/branch-name
+```
+
+### GitHub CLI Integration
+
+This project uses the GitHub CLI (`gh`) for streamlined pull request management:
+
+#### Installation
+```bash
+# macOS
+brew install gh
+
+# Ubuntu/Debian
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install gh
+```
+
+#### Authentication
+```bash
+# Authenticate with GitHub
+gh auth login
+```
+
+#### Common PR Operations
+```bash
+# Create pull request
+gh pr create --title "Title" --body "Description"
+
+# List pull requests
+gh pr list
+
+# View PR details
+gh pr view PR_NUMBER
+
+# Check PR status
+gh pr status
+
+# Merge PR (after approval)
+gh pr merge PR_NUMBER --merge
+
+# Close PR without merging
+gh pr close PR_NUMBER
+```
+
+### Template Development
+
+When modifying service configuration templates in `./templates/`:
+
+#### Template Structure
+```
+./templates/
+├── nginx.conf.template       # HTTP server configuration
+├── dnsmasq.conf.template     # DHCP and DNS configuration
+├── tftpd-hpa.template        # TFTP server configuration
+└── supervisord.conf.template # Process management configuration
+```
+
+#### Template Variables
+All templates support environment variable substitution using `envsubst`:
+- `${HTTP_PORT}` - HTTP service port (default: 8080)
+- `${TFTP_PORT}` - TFTP service port (default: 6969)
+- `${HOST_IP}` - Server IP address
+- `${PRIMARY_DISTRO}` - Primary Linux distribution
+- `${ARCHITECTURE}` - Target architecture (amd64, arm64)
+- `${DHCP_RANGE_START}` - DHCP range start
+- `${DHCP_RANGE_END}` - DHCP range end
+- `${GATEWAY_IP}` - Network gateway
+- `${DNS_PRIMARY}` - Primary DNS server
+- `${DNS_SECONDARY}` - Secondary DNS server
+
+#### Template Testing
+```bash
+# Test template validation
+./setup.sh # Will validate all templates exist
+
+# Test container build with templates
+podman build -t httpboot-server:latest .
+
+# Test template processing
+podman run --rm -e HTTP_PORT=8080 httpboot-server:latest /usr/local/bin/configure-services.sh
+```
+
+### Best Practices
+
+1. **Branch Naming**: Use descriptive names like `feature/template-refactor` or `fix/container-networking`
+2. **Commit Messages**: Use conventional commit format: `feat:`, `fix:`, `docs:`, `refactor:`
+3. **Pull Request Size**: Keep PRs focused and reviewable (< 500 lines of changes)
+4. **Testing**: Always test changes with a full setup cycle before creating PR
+5. **Documentation**: Update relevant documentation files when making functional changes

@@ -425,7 +425,7 @@ configure_services() {
     print_header "🔧 Configuring Service Templates"
 
     local configure_script="$SCRIPT_DIR/scripts/configure-services.sh"
-    local configs_dir="$SCRIPT_DIR/data/configs"
+    local configs_dir="$SCRIPT_DIR/templates"
 
     # Check if configuration script exists
     if [[ ! -f "$configure_script" ]]; then
