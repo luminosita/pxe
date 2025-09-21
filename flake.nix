@@ -1,0 +1,27 @@
+{
+  description = "Shell using nixpkgs-unstable";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  };
+
+  outputs = { self, nixpkgs }:
+    let
+      system = "aarch64-darwin"; # adjust to your system (e.g., x86_64-linux)
+      
+      pkgs = import nixpkgs {
+        inherit system;
+      };
+    in {
+      devShells.${system}.default = pkgs.mkShell {
+        buildInputs = with pkgs; [
+          claude-code
+        ];
+
+        shellHook = ''
+          export SHELL=/bin/zsh
+          exec /bin/zsh
+        '';
+      };
+    };
+}

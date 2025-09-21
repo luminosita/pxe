@@ -4,3 +4,4 @@ data/http
 data/images
 data/logs
 data/tftp
+flake.lock
