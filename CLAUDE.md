@@ -19,7 +19,6 @@ netboot/
 │   ├── nginx.conf.template       # HTTP server configuration
 │   ├── dnsmasq.conf.template     # DHCP and DNS configuration
 │   ├── tftpd-hpa.template        # TFTP server configuration
-│   └── supervisord.conf.template # Process management configuration
 ├── scripts/
 │   ├── download-images.sh # Linux distribution image management
 │   ├── backup-config.sh   # Configuration backup utility
@@ -431,7 +430,6 @@ When modifying service configuration templates in `./templates/`:
 ├── nginx.conf.template       # HTTP server configuration
 ├── dnsmasq.conf.template     # DHCP and DNS configuration
 ├── tftpd-hpa.template        # TFTP server configuration
-└── supervisord.conf.template # Process management configuration
 ```
 
 #### Template Variables

@@ -660,21 +660,6 @@ COPY --from=builder /usr/local/bin/custom-tool /usr/local/bin/
    EOF
    ```
 
-2. **Add to supervisor configuration:**
-   ```bash
-   # Add to Dockerfile
-   RUN cat >> /etc/supervisor/conf.d/httpboot.conf << 'EOF'
-   
-   [program:custom-service]
-   command=/usr/local/bin/custom-service.sh
-   autostart=true
-   autorestart=true
-   stderr_logfile=/var/log/httpboot/custom-service-error.log
-   stdout_logfile=/var/log/httpboot/custom-service.log
-   user=httpboot
-   EOF
-   ```
-
 ### Container Hooks and Extensions
 
 1. **Pre-start hooks:**

@@ -15,6 +15,15 @@ This guide covers common issues, solutions, and debugging techniques for the HTT
 
 ## 🔍 Quick Diagnostics
 
+### Service Management Overview
+
+The HTTP Boot Infrastructure uses **direct service management** instead of supervisor. Services (nginx and TFTP) are managed directly by the entrypoint script with built-in monitoring and restart capabilities.
+
+**Key service processes to check:**
+- `nginx` - HTTP server process
+- `in.tftpd` - TFTP server process
+- `entrypoint.sh` - Main management process
+
 ### First Steps for Any Issue
 
 1. **Run health check:**
@@ -37,13 +46,13 @@ This guide covers common issues, solutions, and debugging techniques for the HTT
 
 ```bash
 # Check all services
-podman exec httpboot-server supervisorctl status
+podman exec httpboot-server ps aux
 
 # Test HTTP service
 curl http://localhost:8080/health
 
 # Test TFTP connectivity
-echo "test" | nc -u localhost 69
+echo "test" | nc -u localhost 6969
 
 # Check running processes
 podman exec httpboot-server ps aux
@@ -105,6 +114,45 @@ podman stats httpboot-server
    podman system reset  # Last resort - removes all containers
    ```
 
+### Service Process Issues
+
+#### Symptoms
+- HTTP service not responding
+- TFTP timeouts
+- Services not starting automatically
+
+#### Solutions
+
+1. **Check service processes:**
+   ```bash
+   # View all processes in container
+   podman exec httpboot-server ps aux
+
+   # Check specific services
+   podman exec httpboot-server pgrep nginx
+   podman exec httpboot-server pgrep in.tftpd
+   ```
+
+2. **Restart individual services:**
+   ```bash
+   # Restart nginx
+   podman exec httpboot-server pkill nginx
+   # Wait for automatic restart (30 seconds)
+
+   # Restart TFTP
+   podman exec httpboot-server pkill in.tftpd
+   # Wait for automatic restart (30 seconds)
+   ```
+
+3. **Check entrypoint script status:**
+   ```bash
+   # The entrypoint script should be PID 1
+   podman exec httpboot-server ps -p 1
+
+   # Monitor entrypoint logs in real-time
+   podman logs -f httpboot-server
+   ```
+
 ### Container Keeps Restarting
 
 #### Symptoms
@@ -127,8 +175,8 @@ podman stats httpboot-server
    # Failed health checks
    curl http://localhost:8080/health
    
-   # Service configuration errors
-   podman exec httpboot-server supervisorctl status
+   # Service process failures
+   podman exec httpboot-server ps aux | grep -E "nginx|tftpd"
    ```
 
 3. **Increase container resources:**
@@ -170,7 +218,7 @@ podman stats httpboot-server
    
    # If this fixes it, add proper rules
    sudo firewall-cmd --permanent --add-port=8080/tcp
-   sudo firewall-cmd --permanent --add-port=69/udp
+   sudo firewall-cmd --permanent --add-port=6969/udp
    sudo firewall-cmd --reload
    ```
 
@@ -245,7 +293,7 @@ podman stats httpboot-server
 3. **Check TFTP configuration:**
    ```bash
    podman exec httpboot-server cat /etc/default/tftpd-hpa
-   podman exec httpboot-server supervisorctl status tftpd
+   podman exec httpboot-server ps aux | grep tftpd
    ```
 
 ### Boot Menu Not Displaying
@@ -319,14 +367,14 @@ podman stats httpboot-server
 
 1. **Check nginx status:**
    ```bash
-   podman exec httpboot-server supervisorctl status nginx
+   podman exec httpboot-server ps aux | grep nginx
    podman exec httpboot-server nginx -t  # Test configuration
    ```
 
 2. **Check nginx logs:**
    ```bash
-   podman exec httpboot-server tail -f /var/log/httpboot/nginx-error.log
-   podman exec httpboot-server tail -f /var/log/httpboot/nginx-access.log
+   podman exec httpboot-server tail -f /var/lib/httpboot/logs/nginx.error.log
+   podman exec httpboot-server tail -f /var/lib/httpboot/logs/nginx.log
    ```
 
 3. **Test HTTP functionality:**
@@ -352,20 +400,20 @@ podman stats httpboot-server
 
 1. **Check dnsmasq status:**
    ```bash
-   podman exec httpboot-server supervisorctl status dnsmasq
+   podman exec httpboot-server ps aux | grep dnsmasq
    podman exec httpboot-server dnsmasq --test
    ```
 
 2. **Check DHCP configuration:**
    ```bash
-   podman exec httpboot-server cat /etc/dnsmasq.d/httpboot.conf
+   podman exec httpboot-server cat /etc/dnsmasq.conf
    ```
 
 3. **Monitor DHCP traffic:**
    ```bash
    # Inside container
-   podman exec httpboot-server tail -f /var/log/httpboot/dnsmasq.log
-   
+   podman exec httpboot-server tail -f /var/lib/httpboot/logs/dnsmasq.log
+
    # On host
    sudo tcpdump -i any port 67 or port 68
    ```
@@ -699,7 +747,7 @@ podman stats httpboot-server
    ```bash
    # Allow HTTP Boot ports
    sudo firewall-cmd --permanent --add-port=8080/tcp
-   sudo firewall-cmd --permanent --add-port=69/udp
+   sudo firewall-cmd --permanent --add-port=6969/udp
    sudo firewall-cmd --reload
    ```
 
@@ -707,7 +755,7 @@ podman stats httpboot-server
    ```bash
    # From client network
    telnet boot-server-ip 8080
-   nc -u boot-server-ip 69
+   nc -u boot-server-ip 6969
    ```
 
 ## 🔬 Advanced Debugging
@@ -719,7 +767,7 @@ podman stats httpboot-server
 sudo tcpdump -i any -n port 67 or port 68
 
 # Capture TFTP traffic
-sudo tcpdump -i any -n port 69
+sudo tcpdump -i any -n port 6969
 
 # Capture HTTP traffic
 sudo tcpdump -i any -n port 8080
@@ -738,7 +786,7 @@ podman exec -it httpboot-server /bin/bash
 podman exec httpboot-server ps aux
 
 # Check service status
-podman exec httpboot-server supervisorctl status
+podman exec httpboot-server ps aux | grep -E "nginx|tftpd|dnsmasq"
 
 # Debug individual services
 podman exec httpboot-server nginx -t
@@ -761,7 +809,7 @@ podman logs -f httpboot-server
 podman logs httpboot-server > debug.log
 
 # Analyze access patterns
-podman exec httpboot-server tail -1000 /var/log/httpboot/nginx-access.log | \
+podman exec httpboot-server tail -1000 /var/lib/httpboot/logs/nginx.log | \
   awk '{print $1}' | sort | uniq -c | sort -nr
 ```
 
