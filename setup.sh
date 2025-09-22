@@ -85,8 +85,18 @@ check_prerequisites() {
     
     # Check if running as root for privileged ports
     if [[ "${HTTP_PORT:-8080}" -lt 1024 || "${TFTP_PORT:-69}" -lt 1024 ]] && [[ $EUID -ne 0 ]]; then
-        print_status "$YELLOW" "⚠️  Warning: Using privileged ports but not running as root"
-        print_status "$YELLOW" "   Podman may need additional configuration for port binding"
+        print_status "$YELLOW" "⚠️  Warning: Using privileged ports (${HTTP_PORT:-8080}, ${TFTP_PORT:-69}) but not running as root"
+        print_status "$YELLOW" "   Will attempt to use sudo for privileged port binding"
+
+        # Check if sudo is available
+        if ! command -v sudo >/dev/null 2>&1; then
+            error_exit "Privileged ports require sudo, but sudo is not available"
+        fi
+
+        # Set flag for sudo usage
+        export REQUIRES_SUDO=true
+    else
+        export REQUIRES_SUDO=false
     fi
     
     # Check Podman
@@ -180,15 +190,41 @@ build_container() {
 # Stop existing container
 stop_existing_container() {
     local container_name="${CONTAINER_NAME:-httpboot-server}"
-    
+
+    # Determine if we need sudo by checking if container exists in user or root context
+    local needs_sudo=false
+    local container_exists=false
+
+    # Check user containers first
     if podman ps -q --filter "name=$container_name" | grep -q .; then
-        print_status "$YELLOW" "🛑 Stopping existing container: $container_name"
-        podman stop "$container_name" || true
+        container_exists=true
+    elif podman ps -aq --filter "name=$container_name" | grep -q .; then
+        container_exists=true
     fi
-    
-    if podman ps -aq --filter "name=$container_name" | grep -q .; then
-        print_status "$YELLOW" "🗑️ Removing existing container: $container_name"
-        podman rm "$container_name" || true
+
+    # If not found in user context and we might need sudo, check root context
+    if [[ "$container_exists" == "false" && "${REQUIRES_SUDO:-false}" == "true" ]]; then
+        if sudo podman ps -q --filter "name=$container_name" 2>/dev/null | grep -q .; then
+            container_exists=true
+            needs_sudo=true
+        elif sudo podman ps -aq --filter "name=$container_name" 2>/dev/null | grep -q .; then
+            container_exists=true
+            needs_sudo=true
+        fi
+    fi
+
+    if [[ "$container_exists" == "true" ]]; then
+        if [[ "$needs_sudo" == "true" ]]; then
+            print_status "$YELLOW" "🛑 Stopping existing container (with sudo): $container_name"
+            sudo podman stop "$container_name" || true
+            print_status "$YELLOW" "🗑️ Removing existing container (with sudo): $container_name"
+            sudo podman rm "$container_name" || true
+        else
+            print_status "$YELLOW" "🛑 Stopping existing container: $container_name"
+            podman stop "$container_name" || true
+            print_status "$YELLOW" "🗑️ Removing existing container: $container_name"
+            podman rm "$container_name" || true
+        fi
     fi
 }
 
@@ -231,14 +267,23 @@ deploy_container() {
         "--hostname" "httpboot-server"
     )
     
-    # Run container
-    if ! podman run -d \
-        "${container_opts[@]}" \
-        "${volumes[@]}" \
-        "${ports[@]}" \
-        "${env_vars[@]}" \
-        "$image_name"; then
-        error_exit "Failed to start container"
+    # Run container with sudo if required for privileged ports
+    local run_cmd=("podman" "run" "-d")
+    run_cmd+=("${container_opts[@]}")
+    run_cmd+=("${volumes[@]}")
+    run_cmd+=("${ports[@]}")
+    run_cmd+=("${env_vars[@]}")
+    run_cmd+=("$image_name")
+
+    if [[ "${REQUIRES_SUDO:-false}" == "true" ]]; then
+        print_status "$BLUE" "🔒 Using sudo for privileged port binding..."
+        if ! sudo "${run_cmd[@]}"; then
+            error_exit "Failed to start container with sudo"
+        fi
+    else
+        if ! "${run_cmd[@]}"; then
+            error_exit "Failed to start container"
+        fi
     fi
     
     print_status "$GREEN" "✅ Container deployed successfully"
@@ -247,11 +292,26 @@ deploy_container() {
     print_status "$BLUE" "⏳ Waiting for services to start..."
     sleep 10
     
-    # Check container status
-    if ! podman ps --filter "name=$container_name" --format "{{.Names}}" | grep -q "$container_name"; then
+    # Check container status (check both user and root context if needed)
+    local container_running=false
+
+    if podman ps --filter "name=$container_name" --format "{{.Names}}" | grep -q "$container_name"; then
+        container_running=true
+    elif [[ "${REQUIRES_SUDO:-false}" == "true" ]] && sudo podman ps --filter "name=$container_name" --format "{{.Names}}" 2>/dev/null | grep -q "$container_name"; then
+        container_running=true
+    fi
+
+    if [[ "$container_running" != "true" ]]; then
         print_status "$RED" "❌ Container is not running"
         print_status "$YELLOW" "📋 Container logs:"
-        podman logs "$container_name" | tail -20
+
+        # Try to get logs from both contexts
+        if podman logs "$container_name" 2>/dev/null | tail -20; then
+            :
+        elif [[ "${REQUIRES_SUDO:-false}" == "true" ]]; then
+            sudo podman logs "$container_name" 2>/dev/null | tail -20 || true
+        fi
+
         error_exit "Container failed to start"
     fi
     
@@ -280,7 +340,11 @@ test_services() {
             if [[ $attempt -eq $max_attempts ]]; then
                 print_status "$RED" "❌ HTTP service is not responding after $max_attempts attempts"
                 print_status "$YELLOW" "📋 Container logs:"
-                podman logs "$container_name" | tail -10
+                if ! podman logs "$container_name" 2>/dev/null | tail -10; then
+                    if [[ "${REQUIRES_SUDO:-false}" == "true" ]]; then
+                        sudo podman logs "$container_name" 2>/dev/null | tail -10 || true
+                    fi
+                fi
             else
                 print_status "$YELLOW" "⏳ Attempt $attempt/$max_attempts - waiting for HTTP service..."
                 sleep 3
@@ -332,7 +396,10 @@ test_services() {
     
     # Display container status
     print_status "$BLUE" "📊 Container status:"
-    podman ps --filter "name=$container_name" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    if ! podman ps --filter "name=$container_name" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || \
+       [[ "${REQUIRES_SUDO:-false}" == "true" ]]; then
+        sudo podman ps --filter "name=$container_name" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
+    fi
 }
 
 # Generate configuration summary
@@ -406,12 +473,25 @@ EOF
 cleanup() {
     if [[ ${1:-0} -ne 0 ]]; then
         print_status "$RED" "❌ Setup failed. Check $LOG_FILE for details."
-        
+
         local container_name="${CONTAINER_NAME:-httpboot-server}"
-        if podman ps -q --filter "name=$container_name" | grep -q .; then
+        local container_found=false
+
+        # Check user containers first
+        if podman ps -q --filter "name=$container_name" 2>/dev/null | grep -q .; then
+            container_found=true
             print_status "$YELLOW" "🧹 Cleaning up failed deployment..."
             podman stop "$container_name" || true
             podman rm "$container_name" || true
+        fi
+
+        # Check root containers if needed
+        if [[ "$container_found" == "false" && "${REQUIRES_SUDO:-false}" == "true" ]]; then
+            if sudo podman ps -q --filter "name=$container_name" 2>/dev/null | grep -q .; then
+                print_status "$YELLOW" "🧹 Cleaning up failed deployment (with sudo)..."
+                sudo podman stop "$container_name" || true
+                sudo podman rm "$container_name" || true
+            fi
         fi
     fi
 }
@@ -588,9 +668,46 @@ EOF
     deploy_container
     test_services
     run_health_check
+    validate_backup_script
     generate_summary
 
     print_status "$GREEN" "✅ HTTP Boot Infrastructure setup completed successfully!"
+}
+
+# Validate backup functionality
+validate_backup_script() {
+    print_header "💾 Validating Backup Functionality"
+
+    local backup_script="$SCRIPT_DIR/scripts/backup-config.sh"
+
+    if [[ ! -f "$backup_script" ]]; then
+        print_status "$YELLOW" "⚠️  Backup script not found: $backup_script"
+        return 0
+    fi
+
+    if [[ ! -x "$backup_script" ]]; then
+        print_status "$BLUE" "🔧 Making backup script executable"
+        chmod +x "$backup_script"
+    fi
+
+    print_status "$BLUE" "🧪 Testing backup script functionality..."
+
+    # Test help command
+    if "$backup_script" help >/dev/null 2>&1; then
+        print_status "$GREEN" "✅ Backup script help command works"
+    else
+        print_status "$YELLOW" "⚠️  Backup script help command failed"
+    fi
+
+    # Test list command (should work even with no backups)
+    if "$backup_script" list >/dev/null 2>&1; then
+        print_status "$GREEN" "✅ Backup script list command works"
+    else
+        print_status "$YELLOW" "⚠️  Backup script list command failed"
+    fi
+
+    print_status "$BLUE" "💡 Use './scripts/backup-config.sh backup' to create configuration backups"
+    print_status "$BLUE" "💡 Use './scripts/backup-config.sh list' to view available backups"
 }
 
 # Run main function with all arguments

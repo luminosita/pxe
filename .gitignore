@@ -1,9 +1,11 @@
-devbox.lock
 setup.log
 data/http
 data/images
 data/logs
 data/tftp
+backups
 flake.lock
 health-check.log
 .env
+node_modules
+package-lock.json

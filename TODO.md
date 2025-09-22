@@ -1,1 +1,2 @@
-- [ ] backup script execution and validation
+- [x] update setup.sh to validate TFTP port and start container with sudo privileges, only if needed
+- [x] backup script execution and validation

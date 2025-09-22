@@ -17,6 +17,7 @@
         buildInputs = with pkgs; [
           claude-code
           podman
+          litellm
         ];
 
         shellHook = ''
