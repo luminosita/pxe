@@ -412,9 +412,9 @@ check_boot_images() {
     for file_path in "${http_test_files[@]}"; do
         local url="${http_base}${file_path}"
         if command -v curl >/dev/null 2>&1; then
-            if curl -f -s -I "$url" >/dev/null 2>&1; then
+            if curl -f -s -I --max-time 10 "$url" >/dev/null 2>&1; then
                 # Get file size from HTTP headers
-                local http_size=$(curl -s -I "$url" | grep -i content-length | cut -d' ' -f2 | tr -d '\r\n' || echo "Unknown")
+                local http_size=$(curl -s -I --max-time 5 "$url" | grep -i content-length | cut -d' ' -f2 | tr -d '\r\n' || echo "Unknown")
                 if [[ "$http_size" != "Unknown" ]] && [[ "$http_size" -gt 0 ]]; then
                     local size_mb=$((http_size / 1024 / 1024))
                     print_status "$GREEN" "✅ HTTP: $(basename "$file_path") (${size_mb}MB)"
