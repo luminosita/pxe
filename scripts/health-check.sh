@@ -324,6 +324,161 @@ check_data_directories() {
     fi
 }
 
+# Check boot images and PXE configuration
+check_boot_images() {
+    print_header "🚀 Boot Images and PXE Configuration Check"
+
+    local data_dir="$PROJECT_DIR/data"
+    local tftp_dir="$data_dir/tftp"
+    local http_dir="$data_dir/http"
+
+    print_status "$BLUE" "🔍 Validating PXE boot files..."
+
+    # Critical PXE boot files
+    local critical_files=(
+        "$tftp_dir/pxelinux.0"
+        "$tftp_dir/pxelinux.cfg/default"
+    )
+
+    # Check critical PXE files
+    for file in "${critical_files[@]}"; do
+        if [[ -e "$file" ]]; then
+            if [[ -L "$file" ]]; then
+                local target=$(readlink "$file")
+                if [[ -e "$file" ]]; then
+                    print_status "$GREEN" "✅ $(basename "$file") (symlink → $target)"
+                else
+                    add_issue "Broken symlink: $(basename "$file") → $target"
+                fi
+            else
+                print_status "$GREEN" "✅ $(basename "$file")"
+            fi
+        else
+            add_issue "Critical PXE file missing: $(basename "$file")"
+        fi
+    done
+
+    # Check boot menu configuration
+    local boot_menu="$tftp_dir/pxelinux.cfg/default"
+    if [[ -f "$boot_menu" ]]; then
+        print_status "$BLUE" "📋 Checking boot menu configuration..."
+
+        # Check if menu has content
+        if [[ -s "$boot_menu" ]]; then
+            local menu_lines=$(wc -l < "$boot_menu" 2>/dev/null || echo "0")
+            print_status "$GREEN" "✅ Boot menu configured ($menu_lines lines)"
+
+            # Check for common menu entries
+            if grep -q "LABEL\|MENU LABEL" "$boot_menu" 2>/dev/null; then
+                print_status "$GREEN" "✅ Boot menu contains boot options"
+            else
+                add_warning "Boot menu exists but may not contain boot options"
+            fi
+        else
+            add_issue "Boot menu file is empty"
+        fi
+    else
+        add_issue "Boot menu configuration file not found"
+    fi
+
+    # Check Debian installer files
+    print_status "$BLUE" "🐧 Checking Debian installer files..."
+    local debian_dir="$tftp_dir/debian-installer/amd64"
+    local debian_files=(
+        "$debian_dir/linux"
+        "$debian_dir/initrd.gz"
+        "$debian_dir/pxelinux.0"
+    )
+
+    for file in "${debian_files[@]}"; do
+        if [[ -f "$file" ]]; then
+            local size=$(du -h "$file" 2>/dev/null | cut -f1 || echo "Unknown")
+            print_status "$GREEN" "✅ $(basename "$file") ($size)"
+        else
+            add_warning "Debian installer file missing: $(basename "$file")"
+        fi
+    done
+
+    # Check HTTP access to boot files
+    print_status "$BLUE" "🌐 Checking HTTP access to boot files..."
+    local http_base="http://${HOST_IP}:${HTTP_PORT}"
+
+    # Test HTTP access to kernel and initrd
+    local http_test_files=(
+        "/boot/debian-installer/amd64/linux"
+        "/boot/debian-installer/amd64/initrd.gz"
+    )
+
+    for file_path in "${http_test_files[@]}"; do
+        local url="${http_base}${file_path}"
+        if command -v curl >/dev/null 2>&1; then
+            if curl -f -s -I "$url" >/dev/null 2>&1; then
+                # Get file size from HTTP headers
+                local http_size=$(curl -s -I "$url" | grep -i content-length | cut -d' ' -f2 | tr -d '\r\n' || echo "Unknown")
+                if [[ "$http_size" != "Unknown" ]] && [[ "$http_size" -gt 0 ]]; then
+                    local size_mb=$((http_size / 1024 / 1024))
+                    print_status "$GREEN" "✅ HTTP: $(basename "$file_path") (${size_mb}MB)"
+                else
+                    print_status "$GREEN" "✅ HTTP: $(basename "$file_path")"
+                fi
+            else
+                add_issue "HTTP access failed for: $(basename "$file_path")"
+            fi
+        else
+            add_warning "curl not available for HTTP testing"
+            break
+        fi
+    done
+
+    # Check TFTP file structure
+    print_status "$BLUE" "📁 Checking TFTP directory structure..."
+    local required_dirs=(
+        "$tftp_dir/pxelinux.cfg"
+        "$tftp_dir/debian-installer"
+        "$tftp_dir/debian-installer/amd64"
+    )
+
+    for dir in "${required_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            local file_count=$(find "$dir" -type f 2>/dev/null | wc -l || echo "0")
+            print_status "$GREEN" "✅ $(basename "$dir")/ ($file_count files)"
+        else
+            add_warning "Directory missing: $(basename "$dir")/"
+        fi
+    done
+
+    # Check HTTP symlinks
+    print_status "$BLUE" "🔗 Checking HTTP symlinks..."
+    local http_boot_dir="$http_dir/boot"
+    if [[ -L "$http_boot_dir" ]]; then
+        local target=$(readlink "$http_boot_dir")
+        if [[ -e "$http_boot_dir" ]]; then
+            print_status "$GREEN" "✅ HTTP boot symlink working → $target"
+        else
+            add_issue "Broken HTTP boot symlink → $target"
+        fi
+    elif [[ -d "$http_boot_dir" ]]; then
+        print_status "$GREEN" "✅ HTTP boot directory exists"
+    else
+        add_issue "HTTP boot directory/symlink missing"
+    fi
+
+    # Summary of boot image status
+    print_status "$BLUE" "📊 Boot Image Summary:"
+    local total_tftp_files=$(find "$tftp_dir" -type f 2>/dev/null | wc -l || echo "0")
+    local total_http_files=$(find "$http_dir" -type f 2>/dev/null | wc -l || echo "0")
+    print_status "$BLUE" "   TFTP files: $total_tftp_files"
+    print_status "$BLUE" "   HTTP files: $total_http_files"
+
+    # Check if download script exists for troubleshooting
+    local download_script="$PROJECT_DIR/scripts/download-images.sh"
+    if [[ -x "$download_script" ]]; then
+        print_status "$BLUE" "💡 To refresh boot images: ./scripts/download-images.sh"
+    else
+        add_warning "Download script not found or not executable"
+    fi
+}
+
 # Check DHCP service (if applicable)
 check_dhcp_service() {
     print_header "🔌 DHCP Service Check"
@@ -738,6 +893,7 @@ main() {
             check_tftp_service
             check_dhcp_service
             check_data_directories
+            check_boot_images
             check_network_connectivity
             check_log_files
             check_system_resources
@@ -748,6 +904,7 @@ main() {
             check_container_status
             check_http_service
             check_tftp_service
+            check_boot_images
             generate_health_report
             ;;
         "monitor")
