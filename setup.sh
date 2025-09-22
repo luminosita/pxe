@@ -444,7 +444,6 @@ configure_services() {
         "$configs_dir/nginx.conf.template"
         "$configs_dir/dnsmasq.conf.template"
         "$configs_dir/tftpd-hpa.template"
-        "$configs_dir/supervisord.conf.template"
     )
 
     print_status "$BLUE" "🔍 Validating configuration templates..."

@@ -70,7 +70,7 @@ podman stats httpboot-server
    ```bash
    # Check what's using your ports
    ss -tulpn | grep :8080
-   ss -tulpn | grep :69
+   ss -tulpn | grep :6969
    
    # Kill conflicting processes or change ports in .env
    sudo kill -9 <PID>

@@ -1233,7 +1233,7 @@ COPY --from=builder /usr/local/bin/custom-tool /usr/local/bin/
          service: httpboot-server
        ports:
          - "8080:8080"
-         - "69:69/udp"
+         - "69:6969/udp"
        volumes:
          - ./data:/var/lib/httpboot
          - ./scripts:/usr/local/scripts

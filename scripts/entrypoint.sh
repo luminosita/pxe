@@ -21,6 +21,10 @@ chown -R root:root /var/lib/httpboot/logs /var/lib/httpboot/configs
 chmod 755 /var/lib/httpboot/tftp /var/lib/httpboot/http
 chmod 755 /var/lib/httpboot/logs /var/lib/httpboot/configs
 
+# Ensure log directories are writable
+mkdir -p /var/lib/httpboot/logs
+chmod 755 /var/lib/httpboot/logs
+
 # Create health check endpoint
 log "🏥 Setting up health monitoring..."
 cat > /var/lib/httpboot/http/index.html << EOF
@@ -46,8 +50,33 @@ EOF
 
 log "✅ Container initialization complete"
 log "🌐 HTTP Server: http://${HOST_IP:-localhost}:${HTTP_PORT:-8080}"
-log "📡 TFTP Server: ${HOST_IP:-localhost}:${TFTP_PORT:-69}"
+log "📡 TFTP Server: ${HOST_IP:-localhost}:${TFTP_PORT:-6969}"
 
-# Start supervisor to manage all services
-log "🎯 Starting services with supervisor..."
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/httpboot.conf
+# Start services directly without supervisor
+log "🎯 Starting services directly..."
+log "Starting nginx..."
+nginx &
+
+log "Starting TFTP service..."
+/usr/sbin/in.tftpd --foreground --user httpboot --secure --create --verbose --address 0.0.0.0:${TFTP_PORT:-6969} /var/lib/httpboot/tftp &
+
+log "✅ All services started successfully"
+log "🌐 HTTP service running on port ${HTTP_PORT:-8080}"
+log "📡 TFTP service running on port ${TFTP_PORT:-6969}"
+
+# Keep container running and monitor services
+while true; do
+    # Check if nginx is still running
+    if ! pgrep nginx > /dev/null; then
+        log "⚠️  Nginx stopped, restarting..."
+        nginx &
+    fi
+
+    # Check if TFTP is still running
+    if ! pgrep in.tftpd > /dev/null; then
+        log "⚠️  TFTP stopped, restarting..."
+        /usr/sbin/in.tftpd --foreground --user httpboot --secure --create --verbose --address 0.0.0.0:${TFTP_PORT:-6969} /var/lib/httpboot/tftp &
+    fi
+
+    sleep 30
+done
