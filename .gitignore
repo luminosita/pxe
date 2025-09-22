@@ -6,3 +6,4 @@ data/logs
 data/tftp
 flake.lock
 health-check.log
+.env

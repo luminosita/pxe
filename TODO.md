@@ -1,1 +1,1 @@
-- [ ] update download_images script with all these commands you issued related to symlinks
+- [ ] backup script execution and validation
