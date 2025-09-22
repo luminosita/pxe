@@ -8,7 +8,7 @@ This Claude Code command creates a complete HTTP Boot infrastructure setup using
 
 ### 📦 Generated Files Structure
 ```
-netboot/
+pxe/
 ├── .env                    # Configuration with sensible defaults
 ├── .env.example           # Template with all configuration options
 ├── validate-config.sh     # Pre-deployment validation script

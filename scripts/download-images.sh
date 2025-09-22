@@ -113,10 +113,7 @@ download_debian() {
         # Extract to TFTP directory
         if tar -xzf "$netboot_file" -C "$TFTP_DIR"; then
             print_status "$GREEN" "✅ Debian netboot files extracted successfully"
-            
-            # Create symlinks in HTTP directory for web access
-            cd "$HTTP_DIR/boot" && ln -sf ../../tftp/* . 2>/dev/null || true
-            
+
             # Download additional components
             download_debian_extras
         else
@@ -131,20 +128,28 @@ download_debian() {
 # Download additional Debian components
 download_debian_extras() {
     print_status "$BLUE" "📦 Downloading additional Debian components..."
-    
+
     local base_url="$DEBIAN_MIRROR/dists/$DEBIAN_RELEASE/main/installer-$ARCHITECTURE/current/images"
-    local components=(
-        "$base_url/hd-media/initrd.gz:debian-hd-initrd.gz"
-        "$base_url/hd-media/vmlinuz:debian-hd-vmlinuz"
+
+    # Download hd-media components
+    local hd_media_files=(
+        "initrd.gz"
+        "vmlinuz"
     )
-    
-    for component in "${components[@]}"; do
-        local url="${component%:*}"
-        local filename="${component#*:}"
+
+    for file in "${hd_media_files[@]}"; do
+        local url="$base_url/hd-media/$file"
+        local filename="debian-hd-$file"
         local output="$IMAGES_DIR/$filename"
-        
+
+        print_status "$BLUE" "🔄 Downloading hd-media component: $file"
+
         if download_with_retry "$url" "$output"; then
+            print_status "$GREEN" "✅ Downloaded: $filename"
+            # Create symlink for HTTP access
             ln -sf "$output" "$HTTP_DIR/images/" 2>/dev/null || true
+        else
+            print_status "$YELLOW" "⚠️  Optional component download failed: $filename"
         fi
     done
 }
@@ -165,10 +170,7 @@ download_ubuntu() {
         # Extract to TFTP directory (preserve existing files)
         if tar -xzf "$netboot_file" -C "$TFTP_DIR"; then
             print_status "$GREEN" "✅ Ubuntu netboot files extracted successfully"
-            
-            # Create symlinks in HTTP directory for web access
-            cd "$HTTP_DIR/boot" && ln -sf ../../tftp/* . 2>/dev/null || true
-            
+
             # Download additional components
             download_ubuntu_extras
         else
@@ -183,20 +185,28 @@ download_ubuntu() {
 # Download additional Ubuntu components
 download_ubuntu_extras() {
     print_status "$BLUE" "📦 Downloading additional Ubuntu components..."
-    
+
     local base_url="$UBUNTU_MIRROR/dists/$UBUNTU_RELEASE/main/installer-$ARCHITECTURE/current/legacy-images"
-    local components=(
-        "$base_url/hd-media/initrd.gz:ubuntu-hd-initrd.gz"
-        "$base_url/hd-media/vmlinuz:ubuntu-hd-vmlinuz"
+
+    # Download hd-media components
+    local hd_media_files=(
+        "initrd.gz"
+        "vmlinuz"
     )
-    
-    for component in "${components[@]}"; do
-        local url="${component%:*}"
-        local filename="${component#*:}"
+
+    for file in "${hd_media_files[@]}"; do
+        local url="$base_url/hd-media/$file"
+        local filename="ubuntu-hd-$file"
         local output="$IMAGES_DIR/$filename"
-        
+
+        print_status "$BLUE" "🔄 Downloading hd-media component: $file"
+
         if download_with_retry "$url" "$output"; then
+            print_status "$GREEN" "✅ Downloaded: $filename"
+            # Create symlink for HTTP access
             ln -sf "$output" "$HTTP_DIR/images/" 2>/dev/null || true
+        else
+            print_status "$YELLOW" "⚠️  Optional component download failed: $filename"
         fi
     done
 }
@@ -305,6 +315,80 @@ LABEL fedora-install
 EOF
     
     print_status "$GREEN" "✅ Created Fedora PXE configuration"
+}
+
+# Fix symlinks after extraction
+fix_symlinks() {
+    print_header "🔗 Fixing Symlinks and File Structure"
+
+    # Fix pxelinux.cfg/default symlink
+    local default_config="$TFTP_DIR/pxelinux.cfg/default"
+    local syslinux_config="$TFTP_DIR/debian-installer/amd64/boot-screens/syslinux.cfg"
+
+    if [[ -f "$syslinux_config" ]]; then
+        print_status "$BLUE" "🔧 Fixing pxelinux.cfg/default symlink..."
+
+        # Remove any existing default config (symlink or file)
+        if [[ -e "$default_config" ]] || [[ -L "$default_config" ]]; then
+            rm -f "$default_config"
+        fi
+
+        # Copy the syslinux.cfg as default (more reliable than symlink for PXE boot)
+        if cp "$syslinux_config" "$default_config"; then
+            print_status "$GREEN" "✅ Boot menu configuration copied successfully"
+        else
+            print_status "$YELLOW" "⚠️  Could not copy boot menu, will create new one"
+        fi
+    else
+        print_status "$YELLOW" "⚠️  Original syslinux.cfg not found, will create new boot menu"
+    fi
+
+    # Fix HTTP symlinks
+    print_status "$BLUE" "🔧 Creating HTTP access symlinks..."
+    local http_boot_dir="$HTTP_DIR/boot"
+
+    # Ensure HTTP boot directory exists
+    mkdir -p "$http_boot_dir"
+
+    # Create symlink to TFTP debian-installer directory
+    if [[ -d "$TFTP_DIR/debian-installer" ]]; then
+        ln -sf "../../tftp/debian-installer" "$http_boot_dir/debian-installer" 2>/dev/null || true
+        print_status "$GREEN" "✅ HTTP debian-installer symlink created"
+    fi
+
+    # Create symlink to TFTP version.info if it exists
+    if [[ -f "$TFTP_DIR/version.info" ]]; then
+        ln -sf "../../tftp/version.info" "$http_boot_dir/version.info" 2>/dev/null || true
+        print_status "$GREEN" "✅ HTTP version.info symlink created"
+    fi
+
+    # Verify critical boot files exist
+    local critical_files=(
+        "$TFTP_DIR/pxelinux.0"
+        "$TFTP_DIR/pxelinux.cfg/default"
+        "$TFTP_DIR/debian-installer/amd64/linux"
+        "$TFTP_DIR/debian-installer/amd64/initrd.gz"
+    )
+
+    print_status "$BLUE" "✅ Verifying critical boot files..."
+    local missing_files=0
+
+    for file in "${critical_files[@]}"; do
+        if [[ -f "$file" ]] || [[ -L "$file" && -e "$file" ]]; then
+            print_status "$GREEN" "  ✅ $(basename "$file")"
+        else
+            print_status "$RED" "  ❌ Missing: $(basename "$file")"
+            ((missing_files++))
+        fi
+    done
+
+    if [[ $missing_files -eq 0 ]]; then
+        print_status "$GREEN" "✅ All critical boot files present"
+        return 0
+    else
+        print_status "$YELLOW" "⚠️  $missing_files critical files missing"
+        return 1
+    fi
 }
 
 # Create unified PXE boot menu
@@ -680,8 +764,9 @@ EOF
         esac
     fi
     
-    # Create boot menu
+    # Fix symlinks and create boot menu
     if [[ "$success" == "true" ]]; then
+        fix_symlinks
         create_boot_menu
         
         # Verify downloads

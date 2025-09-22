@@ -95,7 +95,7 @@ The infrastructure is designed to easily support additional Linux distributions.
        print_header "📦 Downloading Alpine Linux (Latest) Boot Files"
        
        local base_url="https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/$ARCHITECTURE"
-       local netboot_url="$base_url/netboot"
+       local netboot_url="$base_url/pxe"
        
        # Download Alpine netboot files
        local alpine_files=(
