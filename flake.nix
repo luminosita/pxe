@@ -15,9 +15,6 @@
     in {
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
-          claude-code
-          podman
-          litellm
         ];
 
         shellHook = ''
